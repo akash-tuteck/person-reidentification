@@ -53,6 +53,7 @@ temp/
 # ==========================================
 # Uploaded files and generated data
 # ==========================================
+app/uploads/*
 app/uploads/videos/
 app/uploads/frames/
 app/uploads/persons/
@@ -63,6 +64,7 @@ app/uploads/video_embeddings/
 app/uploads/processed/
 app/uploads/original/
 app/uploads/detections/
+app/uploads/objects
 
 # ==========================================
 # AI models and weights

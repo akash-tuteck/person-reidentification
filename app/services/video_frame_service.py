@@ -1,5 +1,6 @@
 
 import cv2
+import json
 
 from pathlib import Path
 
@@ -28,10 +29,20 @@ class VideoFrameService:
             )
 
         output_dir = FRAME_DIR / str(video_id)
+
         output_dir.mkdir(
             parents=True,
             exist_ok=True
         )
+
+        # Remove old extracted frames before processing again
+        for old_frame in output_dir.glob("frame_*.jpg"):
+            old_frame.unlink()
+
+        metadata_path = output_dir / "frames_metadata.json"
+
+        if metadata_path.exists():
+            metadata_path.unlink()
 
         capture = cv2.VideoCapture(str(video_path))
 
@@ -94,20 +105,30 @@ class VideoFrameService:
                             f"Unable to save frame: {frame_name}"
                         )
 
-                    extracted_frames.append({
+                    frame_height, frame_width = frame.shape[:2]
+
+                    frame_info = {
 
                         "frame_number": saved_count + 1,
 
                         "source_frame_number": frame_number,
+
+                        "frame_filename": frame_name,
 
                         "timestamp_seconds": round(
                             timestamp,
                             3
                         ),
 
+                        "frame_width": frame_width,
+
+                        "frame_height": frame_height,
+
                         "frame_path": str(frame_path)
 
-                    })
+                    }
+
+                    extracted_frames.append(frame_info)
 
                     saved_count += 1
 
@@ -117,7 +138,8 @@ class VideoFrameService:
 
             capture.release()
 
-        return {
+        # Save metadata permanently
+        metadata = {
 
             "video_id": str(video_id),
 
@@ -138,4 +160,21 @@ class VideoFrameService:
 
             "frames": extracted_frames
 
+        }
+
+        with open(
+            metadata_path,
+            "w",
+            encoding="utf-8"
+        ) as file:
+
+            json.dump(
+                metadata,
+                file,
+                indent=4
+            )
+
+        return {
+            **metadata,
+            "metadata_path": str(metadata_path)
         }
