@@ -16,13 +16,19 @@ from app.services.video_frame_service import VideoFrameService
 from app.services.video_person_detection_service import (
     VideoPersonDetectionService
 )
-
+from app.services.video_tracking_service import (
+    VideoTrackingService
+)
 from app.services.video_osnet_service import (
     VideoOSNetFeatureService
 )
 
 from app.services.video_matching_service import (
     VideoMatchingService
+)
+
+from app.services.video_object_detection_service import (
+    VideoObjectDetectionService
 )
 
 router = APIRouter()
@@ -321,6 +327,38 @@ def extract_video_features(
             status_code=500,
             detail="Video feature extraction failed"
         )
+
+@router.post("/{video_id}/track-persons")
+def track_video_persons(video_id: UUID):
+
+    try:
+
+        result = VideoTrackingService.track_persons(
+            video_id=str(video_id)
+        )
+
+        return {
+            "success": True,
+            "message": "Video person tracking completed successfully",
+            "data": result
+        }
+
+    except FileNotFoundError as error:
+
+        raise HTTPException(status_code=404, detail=str(error))
+
+    except (ValueError, IOError) as error:
+
+        raise HTTPException(status_code=400, detail=str(error))
+
+    except Exception as error:
+
+        print("Video person tracking error:", error)
+
+        raise HTTPException(
+            status_code=500,
+            detail="Video person tracking failed"
+        )
         
 @router.post("/{video_id}/compare-reference")
 def compare_video_with_reference(
@@ -350,6 +388,42 @@ def compare_video_with_reference(
         }
 
     except FileNotFoundError as error:
+        raise HTTPException(status_code=404, detail=str(error))
+
+    except (ValueError, IOError) as error:
+        raise HTTPException(status_code=400, detail=str(error))
+
+    except Exception as error:
+
+        print("Video matching error:", error)
+
+        raise HTTPException(
+            status_code=500,
+            detail="Video reference matching failed"
+        )
+
+# --------------------------------------------------
+# Detect Non-Human Objects in Video Frames
+# --------------------------------------------------
+
+@router.post("/{video_id}/detect-objects")
+def detect_video_objects(
+    video_id: UUID
+):
+
+    try:
+
+        result = VideoObjectDetectionService.detect_objects(
+            video_id=str(video_id)
+        )
+
+        return {
+            "success": True,
+            "message": "Video object detection completed successfully",
+            "data": result
+        }
+
+    except FileNotFoundError as error:
 
         raise HTTPException(
             status_code=404,
@@ -365,9 +439,9 @@ def compare_video_with_reference(
 
     except Exception as error:
 
-        print("Video matching error:", error)
+        print("Video object detection error:", error)
 
         raise HTTPException(
             status_code=500,
-            detail="Video reference matching failed"
+            detail="Video object detection failed"
         )

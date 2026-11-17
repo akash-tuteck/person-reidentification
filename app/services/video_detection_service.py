@@ -1,89 +1,107 @@
 
 import json
 import shutil
-import re
 
 import cv2
 
 from pathlib import Path
 
-from app.services.video_service import VideoProcessingService
-from app.services.object_detection_service import ObjectDetectionService
+from app.services.object_detection_service import (
+    ObjectDetectionService
+)
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 UPLOAD_DIR = BASE_DIR / "uploads"
 
-VIDEO_DETECTION_DIR = UPLOAD_DIR / "video_detections"
-VIDEO_PERSON_DIR = UPLOAD_DIR / "video_persons"
+FRAME_DIR = UPLOAD_DIR / "frames"
 
-VIDEO_DETECTION_DIR.mkdir(parents=True, exist_ok=True)
-VIDEO_PERSON_DIR.mkdir(parents=True, exist_ok=True)
+VIDEO_OBJECT_DIR = UPLOAD_DIR / "video_objects"
+
+VIDEO_OBJECT_DETECTION_DIR = (
+    UPLOAD_DIR / "video_object_detections"
+)
 
 
-class VideoDetectionService:
+class VideoObjectDetectionService:
+
+    # Reuse the existing YOLO model.
+    _model = None
+
+    CATEGORY_CLASS_IDS = {
+        "car": 2,
+        "motorcycle": 3,
+        "bus": 5,
+        "truck": 7,
+        "bird": 14,
+        "cat": 15,
+        "dog": 16
+    }
 
     CONFIDENCE_THRESHOLD = 0.35
     IMAGE_SIZE = 640
 
+    @classmethod
+    def get_model(cls):
+
+        if cls._model is None:
+
+            cls._model = ObjectDetectionService.get_model()
+
+        return cls._model
+
     @staticmethod
-    def extract_frame_metadata(frame_filename: str):
+    def read_json(path):
 
-        frame_match = re.search(
-            r"frame_(\d+)_at_(\d+)ms",
-            frame_filename
-        )
-
-        if not frame_match:
-            return {
-                "frame_number": None,
-                "timestamp_ms": None
-            }
-
-        return {
-            "frame_number": int(frame_match.group(1)),
-            "timestamp_ms": int(frame_match.group(2))
-        }
+        with path.open("r", encoding="utf-8") as file:
+            return json.load(file)
 
     @classmethod
-    def detect_video_frames(
+    def detect_objects(
         cls,
         video_id: str,
         object_categories: list[str] | None = None
     ):
 
-        # Get extracted frames
-        frames_directory = (
-            VideoProcessingService.get_frames_directory(video_id)
+        video_id = str(video_id)
+
+        frame_metadata_path = (
+            FRAME_DIR / video_id / "frames_metadata.json"
         )
 
-        if frames_directory is None:
-            raise ValueError(
-                f"Extracted frames not found for video: {video_id}"
+        if not frame_metadata_path.exists():
+
+            raise FileNotFoundError(
+                "Extract video frames before detecting objects"
             )
 
-        frame_paths = sorted(
-            frames_directory.glob("*.jpg")
+        frame_metadata = cls.read_json(
+            frame_metadata_path
         )
 
-        if not frame_paths:
+        frames = frame_metadata.get("frames", [])
+
+        if not frames:
+
             raise ValueError(
                 "No extracted frames found for this video"
             )
 
-        # Use existing YOLO category configuration
+        # Default: detect all supported non-human objects.
         if object_categories is None:
-            categories = list(
-                ObjectDetectionService.CATEGORY_CLASS_IDS.keys()
-            )
+
+            categories = list(cls.CATEGORY_CLASS_IDS.keys())
+
         else:
+
             categories = list(dict.fromkeys(
                 category.strip().lower()
                 for category in object_categories
             ))
 
         if not categories:
+
             raise ValueError(
                 "At least one object category is required"
             )
@@ -91,79 +109,100 @@ class VideoDetectionService:
         invalid_categories = [
             category
             for category in categories
-            if category not in
-            ObjectDetectionService.CATEGORY_CLASS_IDS
+            if category not in cls.CATEGORY_CLASS_IDS
         ]
 
         if invalid_categories:
+
             raise ValueError(
-                f"Unsupported categories: {invalid_categories}"
+                f"Unsupported categories: {invalid_categories}. "
+                f"Supported categories: "
+                f"{list(cls.CATEGORY_CLASS_IDS.keys())}"
             )
 
+        # Remove previous output for this video only.
+        video_object_dir = VIDEO_OBJECT_DIR / video_id
+
+        video_detection_dir = (
+            VIDEO_OBJECT_DETECTION_DIR / video_id
+        )
+
+        if video_object_dir.exists():
+            shutil.rmtree(video_object_dir)
+
+        if video_detection_dir.exists():
+            shutil.rmtree(video_detection_dir)
+
+        video_object_dir.mkdir(
+            parents=True,
+            exist_ok=True
+        )
+
+        annotated_dir = (
+            video_detection_dir / "annotated_frames"
+        )
+
+        annotated_dir.mkdir(
+            parents=True,
+            exist_ok=True
+        )
+
+        model = cls.get_model()
+
         class_ids = [
-            ObjectDetectionService.CATEGORY_CLASS_IDS[category]
+            cls.CATEGORY_CLASS_IDS[category]
             for category in categories
         ]
 
-        # Reuse the existing YOLO model
-        model = ObjectDetectionService.get_model()
-
         frame_results = []
 
-        total_persons = 0
         total_objects = 0
 
-        for frame_path in frame_paths:
+        total_category_counts = {
+            category: 0
+            for category in categories
+        }
 
-            frame = cv2.imread(str(frame_path))
+        for frame_info in frames:
 
-            if frame is None:
+            frame_filename = frame_info.get(
+                "frame_filename"
+            )
+
+            if not frame_filename:
+
                 raise ValueError(
-                    f"Unable to read frame: {frame_path.name}"
+                    "Frame metadata is missing frame_filename"
                 )
 
-            height, width = frame.shape[:2]
-
-            metadata = cls.extract_frame_metadata(
-                frame_path.name
+            frame_number = int(
+                frame_info.get("frame_number", 0)
             )
 
-            frame_number = metadata["frame_number"]
-            timestamp_ms = metadata["timestamp_ms"]
-
-            frame_name = frame_path.stem
-
-            # Separate output directories for this frame
-            detection_frame_dir = (
-                VIDEO_DETECTION_DIR
-                / video_id
-                / frame_name
+            timestamp = float(
+                frame_info.get("timestamp_seconds", 0)
             )
 
-            person_frame_dir = (
-                VIDEO_PERSON_DIR
-                / video_id
-                / frame_name
+            frame_path = (
+                FRAME_DIR / video_id / frame_filename
             )
 
-            # Remove previous results for this frame
-            if detection_frame_dir.exists():
-                shutil.rmtree(detection_frame_dir)
+            if not frame_path.exists():
 
-            if person_frame_dir.exists():
-                shutil.rmtree(person_frame_dir)
+                raise FileNotFoundError(
+                    f"Video frame not found: {frame_path}"
+                )
 
-            detection_frame_dir.mkdir(
-                parents=True,
-                exist_ok=True
-            )
+            image = cv2.imread(str(frame_path))
 
-            person_frame_dir.mkdir(
-                parents=True,
-                exist_ok=True
-            )
+            if image is None:
 
-            # Run YOLO detection
+                raise ValueError(
+                    f"Unable to read video frame: {frame_path}"
+                )
+
+            height, width = image.shape[:2]
+
             results = model.predict(
                 source=str(frame_path),
                 classes=class_ids,
@@ -174,16 +213,32 @@ class VideoDetectionService:
 
             result = results[0]
 
-            annotated_path = (
-                detection_frame_dir / "annotated.jpg"
+            frame_stem = Path(frame_filename).stem
+
+            frame_object_dir = (
+                video_object_dir / frame_stem
             )
 
-            if not cv2.imwrite(
-                str(annotated_path),
-                result.plot()
-            ):
-                raise RuntimeError(
-                    f"Unable to save annotated frame: {frame_path.name}"
+            frame_object_dir.mkdir(
+                parents=True,
+                exist_ok=True
+            )
+
+            category_directories = {}
+
+            for category in categories:
+
+                category_dir = (
+                    frame_object_dir / category
+                )
+
+                category_dir.mkdir(
+                    parents=True,
+                    exist_ok=True
+                )
+
+                category_directories[category] = (
+                    category_dir
                 )
 
             category_counts = {
@@ -192,13 +247,15 @@ class VideoDetectionService:
             }
 
             detected_objects = []
-            detected_persons = []
 
             if result.boxes is not None:
 
                 for box in result.boxes:
 
-                    class_id = int(box.cls[0].item())
+                    class_id = int(
+                        box.cls[0].item()
+                    )
+
                     category = result.names[class_id]
 
                     if category not in category_counts:
@@ -221,54 +278,49 @@ class VideoDetectionService:
                     if x2 <= x1 or y2 <= y1:
                         continue
 
-                    crop = frame[y1:y2, x1:x2]
+                    object_crop = image[
+                        y1:y2,
+                        x1:x2
+                    ]
 
-                    category_counts[category] += 1
-
-                    object_number = category_counts[category]
+                    object_number = (
+                        category_counts[category] + 1
+                    )
 
                     crop_filename = (
                         f"{category}_{object_number}.jpg"
                     )
 
-                    # Save people separately
-                    if category == "person":
-
-                        crop_path = (
-                            person_frame_dir / crop_filename
-                        )
-
-                    else:
-
-                        category_dir = (
-                            detection_frame_dir / category
-                        )
-
-                        category_dir.mkdir(
-                            parents=True,
-                            exist_ok=True
-                        )
-
-                        crop_path = (
-                            category_dir / crop_filename
-                        )
+                    crop_path = (
+                        category_directories[category]
+                        / crop_filename
+                    )
 
                     if not cv2.imwrite(
                         str(crop_path),
-                        crop
+                        object_crop
                     ):
                         continue
 
-                    confidence = round(
-                        float(box.conf[0].item()),
-                        4
+                    category_counts[category] += 1
+
+                    confidence = float(
+                        box.conf[0].item()
                     )
 
-                    detection_data = {
+                    detected_objects.append({
                         "object_number": object_number,
                         "category": category,
                         "class_id": class_id,
-                        "confidence": confidence,
+                        "confidence": round(
+                            confidence, 4
+                        ),
+                        "bbox": [
+                            x1,
+                            y1,
+                            x2,
+                            y2
+                        ],
                         "bounding_box": {
                             "x1": x1,
                             "y1": y1,
@@ -277,59 +329,72 @@ class VideoDetectionService:
                         },
                         "crop_filename": crop_filename,
                         "crop_path": str(crop_path)
-                    }
+                    })
 
-                    detected_objects.append(
-                        detection_data
-                    )
+            # Save annotated frame.
+            annotated_frame = result.plot()
 
-                    if category == "person":
-
-                        detected_persons.append(
-                            detection_data
-                        )
-
-            total_persons += len(detected_persons)
-            total_objects += len(detected_objects)
-
-            # Save frame detection metadata
-            frame_result = {
-                "video_id": video_id,
-                "frame_number": frame_number,
-                "timestamp_ms": timestamp_ms,
-                "frame_filename": frame_path.name,
-                "total_objects": len(detected_objects),
-                "total_persons": len(detected_persons),
-                "category_counts": category_counts,
-                "annotated_image_path": str(annotated_path),
-                "objects": detected_objects,
-                "persons": detected_persons
-            }
-
-            metadata_path = (
-                detection_frame_dir / "detection_results.json"
+            annotated_path = (
+                annotated_dir / frame_filename
             )
 
-            with open(
-                metadata_path,
-                "w",
-                encoding="utf-8"
-            ) as metadata_file:
+            if not cv2.imwrite(
+                str(annotated_path),
+                annotated_frame
+            ):
 
-                json.dump(
-                    frame_result,
-                    metadata_file,
-                    indent=4
+                raise IOError(
+                    f"Could not save annotated frame: "
+                    f"{annotated_path}"
                 )
 
-            frame_results.append(frame_result)
+            frame_total = len(detected_objects)
 
-        return {
+            total_objects += frame_total
+
+            for category, count in category_counts.items():
+
+                total_category_counts[category] += count
+
+            frame_results.append({
+                "frame_number": frame_number,
+                "frame_filename": frame_filename,
+                "timestamp_seconds": timestamp,
+                "frame_width": width,
+                "frame_height": height,
+                "total_objects": frame_total,
+                "category_counts": category_counts,
+                "objects": detected_objects,
+                "annotated_frame_path": str(annotated_path)
+            })
+
+        output = {
             "video_id": video_id,
             "total_frames_processed": len(frame_results),
             "total_objects_detected": total_objects,
-            "total_persons_detected": total_persons,
+            "category_counts": total_category_counts,
             "categories_processed": categories,
-            "results": frame_results,
-            "status": "completed"
+            "annotated_frames_folder": str(annotated_dir),
+            "objects_folder": str(video_object_dir),
+            "frames": frame_results
         }
+
+        metadata_path = (
+            video_detection_dir
+            / "object_detection_metadata.json"
+        )
+
+        with metadata_path.open(
+            "w",
+            encoding="utf-8"
+        ) as file:
+
+            json.dump(
+                output,
+                file,
+                indent=4
+            )
+
+        output["metadata_path"] = str(metadata_path)
+
+        return output
