@@ -1,13 +1,18 @@
 
 import json
 import shutil
-
 import cv2
 
 from pathlib import Path
 
 from app.services.object_detection_service import (
     ObjectDetectionService
+)
+
+from app.services.object_categories import (
+    NON_PERSON_COCO_CLASS_IDS,
+    OBJECT_DETECTION_CONFIDENCE,
+    OBJECT_DETECTION_IMAGE_SIZE
 )
 
 
@@ -29,24 +34,17 @@ class VideoObjectDetectionService:
     # Reuse the existing YOLO model.
     _model = None
 
-    CATEGORY_CLASS_IDS = {
-        "car": 2,
-        "motorcycle": 3,
-        "bus": 5,
-        "truck": 7,
-        "bird": 14,
-        "cat": 15,
-        "dog": 16
-    }
+    # All 79 non-human COCO categories.
+    CATEGORY_CLASS_IDS = NON_PERSON_COCO_CLASS_IDS
 
-    CONFIDENCE_THRESHOLD = 0.35
-    IMAGE_SIZE = 640
+    CONFIDENCE_THRESHOLD = OBJECT_DETECTION_CONFIDENCE
+
+    IMAGE_SIZE = OBJECT_DETECTION_IMAGE_SIZE
 
     @classmethod
     def get_model(cls):
 
         if cls._model is None:
-
             cls._model = ObjectDetectionService.get_model()
 
         return cls._model
@@ -71,7 +69,6 @@ class VideoObjectDetectionService:
         )
 
         if not frame_metadata_path.exists():
-
             raise FileNotFoundError(
                 "Extract video frames before detecting objects"
             )
@@ -83,25 +80,21 @@ class VideoObjectDetectionService:
         frames = frame_metadata.get("frames", [])
 
         if not frames:
-
             raise ValueError(
                 "No extracted frames found for this video"
             )
 
-        # Default: detect all supported non-human objects.
+        # Default: all 79 non-human categories.
         if object_categories is None:
-
             categories = list(cls.CATEGORY_CLASS_IDS.keys())
 
         else:
-
             categories = list(dict.fromkeys(
                 category.strip().lower()
                 for category in object_categories
             ))
 
         if not categories:
-
             raise ValueError(
                 "At least one object category is required"
             )
@@ -113,7 +106,6 @@ class VideoObjectDetectionService:
         ]
 
         if invalid_categories:
-
             raise ValueError(
                 f"Unsupported categories: {invalid_categories}. "
                 f"Supported categories: "
@@ -170,7 +162,6 @@ class VideoObjectDetectionService:
             )
 
             if not frame_filename:
-
                 raise ValueError(
                     "Frame metadata is missing frame_filename"
                 )
@@ -188,7 +179,6 @@ class VideoObjectDetectionService:
             )
 
             if not frame_path.exists():
-
                 raise FileNotFoundError(
                     f"Video frame not found: {frame_path}"
                 )
@@ -196,7 +186,6 @@ class VideoObjectDetectionService:
             image = cv2.imread(str(frame_path))
 
             if image is None:
-
                 raise ValueError(
                     f"Unable to read video frame: {frame_path}"
                 )
@@ -237,9 +226,7 @@ class VideoObjectDetectionService:
                     exist_ok=True
                 )
 
-                category_directories[category] = (
-                    category_dir
-                )
+                category_directories[category] = category_dir
 
             category_counts = {
                 category: 0
@@ -255,6 +242,10 @@ class VideoObjectDetectionService:
                     class_id = int(
                         box.cls[0].item()
                     )
+
+                    # Explicitly exclude people.
+                    if class_id == 0:
+                        continue
 
                     category = result.names[class_id]
 
@@ -342,7 +333,6 @@ class VideoObjectDetectionService:
                 str(annotated_path),
                 annotated_frame
             ):
-
                 raise IOError(
                     f"Could not save annotated frame: "
                     f"{annotated_path}"
@@ -353,7 +343,6 @@ class VideoObjectDetectionService:
             total_objects += frame_total
 
             for category, count in category_counts.items():
-
                 total_category_counts[category] += count
 
             frame_results.append({

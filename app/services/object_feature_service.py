@@ -8,6 +8,9 @@ from PIL import Image
 from torchvision import transforms
 from transformers import AutoImageProcessor, AutoModel
 
+from app.services.object_categories import (
+    NON_PERSON_COCO_CLASS_IDS
+)
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -24,15 +27,9 @@ class ObjectFeatureService:
     MODEL_NAME = "facebook/dinov2-base"
     EMBEDDING_DIMENSION = 768
 
-    SUPPORTED_CATEGORIES = {
-        "car",
-        "motorcycle",
-        "bus",
-        "truck",
-        "bird",
-        "cat",
-        "dog",
-    }
+    SUPPORTED_CATEGORIES = set(
+        NON_PERSON_COCO_CLASS_IDS.keys()
+    )
 
     _model = None
     _processor = None

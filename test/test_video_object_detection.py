@@ -2,101 +2,107 @@
 import sys
 from pathlib import Path
 
-# Add project root to Python import path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from app.services.object_detection_service import ObjectDetectionService
+from app.services.object_categories import (
+    NON_PERSON_COCO_CLASS_IDS,
+    validate_object_categories
+)
 
-
-
-VIDEO_ID = "b4b6769d-120d-4f32-bfd6-9e64da402293"
-
-FRAME_PATH = (
-    Path("app/uploads/frames")
-    / VIDEO_ID
-    / "frame_000001.jpg"
+from app.services.video_object_detection_service import (
+    VideoObjectDetectionService
 )
 
 
-def main():
+def test_video_object_detection():
 
-    print("\nYOLO OBJECT DETECTION DIAGNOSTIC")
-    print("=" * 40)
+    print("\nVIDEO OBJECT DETECTION TEST")
+    print("===========================")
 
-    if not FRAME_PATH.exists():
-        print("Frame not found:", FRAME_PATH)
-        return
+    validate_object_categories()
 
-    model = ObjectDetectionService.get_model()
-
-    # Test 1: Detect every class without filtering
-    results = model.predict(
-        source=str(FRAME_PATH),
-        conf=0.10,
-        imgsz=640,
-        verbose=False
+    print(
+        "Supported non-human categories:",
+        len(NON_PERSON_COCO_CLASS_IDS)
     )
 
-    result = results[0]
-
-    print("\nTEST 1: All detected classes")
-    print("-" * 40)
-
-    if result.boxes is None or len(result.boxes) == 0:
-        print("No objects detected at confidence 0.10")
-
-    else:
-        for box in result.boxes:
-
-            class_id = int(box.cls[0].item())
-            confidence = float(box.conf[0].item())
-
-            category = result.names[class_id]
-
-            print(
-                f"Category: {category}, "
-                f"Class ID: {class_id}, "
-                f"Confidence: {confidence:.3f}"
-            )
-
-    # Test 2: Detect only our required non-human classes
-    category_ids = [
-        2, 3, 5, 7, 14, 15, 16
-    ]
-
-    filtered_results = model.predict(
-        source=str(FRAME_PATH),
-        classes=category_ids,
-        conf=0.10,
-        imgsz=640,
-        verbose=False
+    print(
+        "Person excluded:",
+        "person" not in NON_PERSON_COCO_CLASS_IDS
     )
 
-    filtered_result = filtered_results[0]
+    video_id = input("\nEnter your existing video ID: ").strip()
 
-    print("\nTEST 2: Required non-human objects")
-    print("-" * 40)
+    try:
 
-    if (
-        filtered_result.boxes is None
-        or len(filtered_result.boxes) == 0
-    ):
-        print("No required non-human objects detected")
+        result = VideoObjectDetectionService.detect_objects(
+            video_id=video_id
+        )
 
-    else:
-        for box in filtered_result.boxes:
+        print("\nDETECTION RESULT")
+        print("================")
 
-            class_id = int(box.cls[0].item())
-            confidence = float(box.conf[0].item())
+        print("Video ID:", result["video_id"])
 
-            print(
-                f"Category: {filtered_result.names[class_id]}, "
-                f"Confidence: {confidence:.3f}"
-            )
+        print(
+            "Frames processed:",
+            result["total_frames_processed"]
+        )
 
-    print("\nDiagnostic completed.")
+        print(
+            "Total objects:",
+            result["total_objects_detected"]
+        )
+
+        print("\nDetected categories:")
+
+        for category, count in result["category_counts"].items():
+
+            if count > 0:
+                print(f"{category}: {count}")
+
+        print("\nFrame-wise results:")
+
+        for frame in result["frames"]:
+
+            if frame["total_objects"] > 0:
+
+                print(
+                    f'Frame {frame["frame_number"]} | '
+                    f'Timestamp: {frame["timestamp_seconds"]}s | '
+                    f'Objects: {frame["total_objects"]}'
+                )
+
+                for obj in frame["objects"]:
+
+                    print(
+                        f'  {obj["category"]} | '
+                        f'Confidence: {obj["confidence"]}'
+                    )
+
+        assert all(
+            obj["category"] != "person"
+            for frame in result["frames"]
+            for obj in frame["objects"]
+        )
+
+        print("\nAnnotated frames:")
+        print(result["annotated_frames_folder"])
+
+        print("\nObject crops:")
+        print(result["objects_folder"])
+
+        print("\nMetadata:")
+        print(result["metadata_path"])
+
+        print("\nTEST PASSED")
+
+    except Exception as error:
+
+        print("\nTEST FAILED")
+        print("Error:", error)
 
 
 if __name__ == "__main__":
-    main()
+    test_video_object_detection()

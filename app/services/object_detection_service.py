@@ -8,6 +8,12 @@ from ultralytics import YOLO
 
 from app.services.image_service import ImageProcessingService
 
+from app.services.object_categories import (
+    NON_PERSON_COCO_CLASS_IDS,
+    OBJECT_DETECTION_CONFIDENCE,
+    OBJECT_DETECTION_IMAGE_SIZE,
+)
+
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -25,17 +31,9 @@ class ObjectDetectionService:
 
     _model = None
 
-    # Supported categories from the YOLOv8 COCO model.
-    CATEGORY_CLASS_IDS = {
-        "person": 0,
-        "car": 2,
-        "motorcycle": 3,
-        "bus": 5,
-        "truck": 7,
-        "bird": 14,
-        "cat": 15,
-        "dog": 16,
-    }
+    # All 79 non-human COCO categories.
+    # Person (class ID 0) is intentionally excluded.
+    CATEGORY_CLASS_IDS = NON_PERSON_COCO_CLASS_IDS
 
     @classmethod
     def get_model(cls):
@@ -64,19 +62,22 @@ class ObjectDetectionService:
         if image is None:
             raise ValueError("Unable to read processed image")
 
-        # Default: detect all categories supported by this service.
+        # Default: detect all 79 non-human categories.
         if object_categories is None:
-            object_categories = list(cls.CATEGORY_CLASS_IDS.keys())
+            categories = list(cls.CATEGORY_CLASS_IDS.keys())
 
-        # Normalize and validate requested categories.
-        categories = list(dict.fromkeys(
-            category.strip().lower()
-            for category in object_categories
-        ))
+        else:
+            categories = list(dict.fromkeys(
+                category.strip().lower()
+                for category in object_categories
+            ))
 
         if not categories:
-            raise ValueError("At least one object category is required")
+            raise ValueError(
+                "At least one object category is required"
+            )
 
+        # Validate requested categories.
         invalid_categories = [
             category
             for category in categories
@@ -86,7 +87,9 @@ class ObjectDetectionService:
         if invalid_categories:
             raise ValueError(
                 f"Unsupported object categories: {invalid_categories}. "
-                f"Supported categories: {list(cls.CATEGORY_CLASS_IDS)}"
+                f"Person is excluded from object detection. "
+                f"Supported categories: "
+                f"{list(cls.CATEGORY_CLASS_IDS.keys())}"
             )
 
         model = cls.get_model()
@@ -99,8 +102,8 @@ class ObjectDetectionService:
         results = model.predict(
             source=str(image_path),
             classes=class_ids,
-            conf=0.35,
-            imgsz=640,
+            conf=OBJECT_DETECTION_CONFIDENCE,
+            imgsz=OBJECT_DETECTION_IMAGE_SIZE,
             verbose=False
         )
 
@@ -110,12 +113,18 @@ class ObjectDetectionService:
 
         annotated_path = DETECTION_DIR / f"{image_id}.jpg"
 
-        if not cv2.imwrite(str(annotated_path), annotated_image):
-            raise ValueError("Unable to save detection image")
+        if not cv2.imwrite(
+            str(annotated_path),
+            annotated_image
+        ):
+            raise ValueError(
+                "Unable to save detection image"
+            )
 
         height, width = image.shape[:2]
 
         detected_objects = []
+
         category_counts = {
             category: 0
             for category in categories
@@ -130,7 +139,6 @@ class ObjectDetectionService:
                 OBJECT_DIR / image_id / category
             )
 
-            # Remove old crops for the selected categories only.
             if category_folder.exists():
                 shutil.rmtree(category_folder)
 
@@ -147,7 +155,14 @@ class ObjectDetectionService:
 
                 class_id = int(box.cls[0].item())
 
-                category = result.names[class_id]
+                # Never allow person into object detection.
+                if class_id == 0:
+                    continue
+
+                category = cls.get_category_name(class_id)
+
+                if category is None:
+                    continue
 
                 if category not in category_counts:
                     continue
@@ -166,9 +181,9 @@ class ObjectDetectionService:
 
                 object_crop = image[y1:y2, x1:x2]
 
-                category_counts[category] += 1
-
-                object_number = category_counts[category]
+                object_number = (
+                    category_counts[category] + 1
+                )
 
                 crop_filename = (
                     f"{category}_{object_number}.jpg"
@@ -179,9 +194,13 @@ class ObjectDetectionService:
                     / crop_filename
                 )
 
-                if not cv2.imwrite(str(crop_path), object_crop):
-                    category_counts[category] -= 1
+                if not cv2.imwrite(
+                    str(crop_path),
+                    object_crop
+                ):
                     continue
+
+                category_counts[category] = object_number
 
                 confidence = float(box.conf[0].item())
 
@@ -208,14 +227,24 @@ class ObjectDetectionService:
             "objects": detected_objects
         }
 
+    @classmethod
+    def get_category_name(cls, class_id: int):
+
+        for category, category_id in cls.CATEGORY_CLASS_IDS.items():
+
+            if category_id == class_id:
+                return category
+
+        return None
+
 
 class PersonDetectionService(ObjectDetectionService):
 
     """
-    Backward-compatible person detection.
+    Person detection remains separate from object detection.
 
-    Keeps the existing person crop directory and response structure
-    so the current OSNet feature extraction pipeline continues working.
+    This preserves the existing person crop directory and response
+    structure so the OSNet feature extraction pipeline continues working.
     """
 
     @classmethod
@@ -251,14 +280,19 @@ class PersonDetectionService(ObjectDetectionService):
             str(annotated_path),
             result.plot()
         ):
-            raise ValueError("Unable to save detection image")
+            raise ValueError(
+                "Unable to save detection image"
+            )
 
         person_folder = PERSON_DIR / image_id
 
         if person_folder.exists():
             shutil.rmtree(person_folder)
 
-        person_folder.mkdir(parents=True, exist_ok=True)
+        person_folder.mkdir(
+            parents=True,
+            exist_ok=True
+        )
 
         height, width = image.shape[:2]
 
@@ -284,11 +318,18 @@ class PersonDetectionService(ObjectDetectionService):
 
                 person_number = len(persons) + 1
 
-                crop_filename = f"person_{person_number}.jpg"
+                crop_filename = (
+                    f"person_{person_number}.jpg"
+                )
 
-                crop_path = person_folder / crop_filename
+                crop_path = (
+                    person_folder / crop_filename
+                )
 
-                if not cv2.imwrite(str(crop_path), person_crop):
+                if not cv2.imwrite(
+                    str(crop_path),
+                    person_crop
+                ):
                     continue
 
                 persons.append({
