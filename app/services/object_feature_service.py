@@ -1,12 +1,10 @@
 
-import cv2
 import numpy as np
 import torch
 
 from pathlib import Path
 from PIL import Image
-from torchvision import transforms
-from transformers import AutoImageProcessor, AutoModel
+from transformers import AutoImageProcessor, AutoModel  # type: ignore[reportMissingImports]
 
 from app.services.object_categories import (
     NON_PERSON_COCO_CLASS_IDS

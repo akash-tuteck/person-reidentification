@@ -1,7 +1,4 @@
 
-import uuid
-
-from pathlib import Path
 from uuid import UUID
 
 from fastapi import (
@@ -11,59 +8,14 @@ from fastapi import (
     HTTPException
 )
 
-from app.services.osnet_service import EMBEDDING_DIR
-from app.services.video_frame_service import VideoFrameService
-from app.services.video_person_detection_service import (
-    VideoPersonDetectionService
-)
-from app.services.video_tracking_service import (
-    VideoTrackingService
-)
-from app.services.video_osnet_service import (
-    VideoOSNetFeatureService
-)
+from app.controllers.video_controller import VideoController
 
-from app.services.video_matching_service import (
-    VideoMatchingService
-)
-
-from app.services.video_object_detection_service import (
-    VideoObjectDetectionService
-)
 
 router = APIRouter()
 
 
 # --------------------------------------------------
-# Directory Configuration
-# --------------------------------------------------
-
-UPLOAD_DIR = EMBEDDING_DIR.parent
-
-VIDEO_DIR = UPLOAD_DIR / "videos"
-
-VIDEO_DIR.mkdir(
-    parents=True,
-    exist_ok=True
-)
-
-
-# --------------------------------------------------
-# Video Configuration
-# --------------------------------------------------
-
-ALLOWED_VIDEO_EXTENSIONS = {
-    ".mp4",
-    ".avi",
-    ".mov",
-    ".mkv"
-}
-
-MAX_VIDEO_SIZE = 500 * 1024 * 1024  # 500 MB
-
-
-# --------------------------------------------------
-# Upload Video
+# UPLOAD VIDEO
 # --------------------------------------------------
 
 @router.post("/upload")
@@ -71,74 +23,31 @@ async def upload_video(
     file: UploadFile = File(...)
 ):
 
-    if not file.filename:
-        raise HTTPException(
-            status_code=400,
-            detail="Video filename is required"
-        )
-
-    extension = Path(file.filename).suffix.lower()
-
-    if extension not in ALLOWED_VIDEO_EXTENSIONS:
-        raise HTTPException(
-            status_code=400,
-            detail="Only MP4, AVI, MOV and MKV videos are allowed"
-        )
-
-    video_id = str(uuid.uuid4())
-
-    video_path = VIDEO_DIR / f"{video_id}{extension}"
-
-    total_size = 0
-
     try:
 
-        with video_path.open("wb") as buffer:
-
-            while True:
-
-                chunk = await file.read(1024 * 1024)
-
-                if not chunk:
-                    break
-
-                total_size += len(chunk)
-
-                if total_size > MAX_VIDEO_SIZE:
-
-                    raise HTTPException(
-                        status_code=413,
-                        detail="Video size cannot exceed 500 MB"
-                    )
-
-                buffer.write(chunk)
-
-        if total_size == 0:
-
-            raise HTTPException(
-                status_code=400,
-                detail="Uploaded video is empty"
-            )
+        result = await VideoController.upload_video(file)
 
         return {
             "success": True,
             "message": "Video uploaded successfully",
-            "data": {
-                "video_id": video_id,
-                "original_filename": file.filename,
-                "stored_filename": video_path.name,
-                "file_size_bytes": total_size,
-                "file_path": str(video_path)
-            }
+            "data": result
         }
 
-    except HTTPException:
-        video_path.unlink(missing_ok=True)
-        raise
+    except OverflowError as error:
+
+        raise HTTPException(
+            status_code=413,
+            detail=str(error)
+        )
+
+    except ValueError as error:
+
+        raise HTTPException(
+            status_code=400,
+            detail=str(error)
+        )
 
     except Exception as error:
-
-        video_path.unlink(missing_ok=True)
 
         print("Video upload error:", error)
 
@@ -147,49 +56,36 @@ async def upload_video(
             detail="Something went wrong while uploading video"
         )
 
-    finally:
-
-        await file.close()
-
 
 # --------------------------------------------------
-# Get Video Information
+# GET VIDEO INFORMATION
 # --------------------------------------------------
 
 @router.get("/{video_id}")
-def get_video(
-    video_id: UUID
-):
+def get_video(video_id: UUID):
 
-    video_id = str(video_id)
+    try:
 
-    video_files = list(
-        VIDEO_DIR.glob(f"{video_id}.*")
-    )
+        result = VideoController.get_video(
+            video_id=str(video_id)
+        )
 
-    if not video_files:
+        return {
+            "success": True,
+            "message": "Video found successfully",
+            "data": result
+        }
+
+    except FileNotFoundError as error:
 
         raise HTTPException(
             status_code=404,
-            detail="Video not found"
+            detail=str(error)
         )
-
-    video_path = video_files[0]
-
-    return {
-        "success": True,
-        "message": "Video found successfully",
-        "data": {
-            "video_id": video_id,
-            "filename": video_path.name,
-            "file_size_bytes": video_path.stat().st_size,
-            "file_path": str(video_path)
-        }
-    }
 
 
 # --------------------------------------------------
-# Extract Video Frames
+# EXTRACT VIDEO FRAMES
 # --------------------------------------------------
 
 @router.post("/{video_id}/extract-frames")
@@ -200,7 +96,7 @@ def extract_video_frames(
 
     try:
 
-        result = VideoFrameService.extract_frames(
+        result = VideoController.extract_frames(
             video_id=str(video_id),
             interval_seconds=interval_seconds
         )
@@ -212,18 +108,10 @@ def extract_video_frames(
         }
 
     except FileNotFoundError as error:
-
-        raise HTTPException(
-            status_code=404,
-            detail=str(error)
-        )
+        raise HTTPException(status_code=404, detail=str(error))
 
     except (ValueError, IOError) as error:
-
-        raise HTTPException(
-            status_code=400,
-            detail=str(error)
-        )
+        raise HTTPException(status_code=400, detail=str(error))
 
     except Exception as error:
 
@@ -236,7 +124,7 @@ def extract_video_frames(
 
 
 # --------------------------------------------------
-# Detect Persons in Video Frames
+# DETECT PERSONS IN VIDEO
 # --------------------------------------------------
 
 @router.post("/{video_id}/detect-persons")
@@ -247,7 +135,7 @@ def detect_video_persons(
 
     try:
 
-        result = VideoPersonDetectionService.detect_persons(
+        result = VideoController.detect_persons(
             video_id=str(video_id),
             interval_seconds=interval_seconds
         )
@@ -259,18 +147,10 @@ def detect_video_persons(
         }
 
     except FileNotFoundError as error:
-
-        raise HTTPException(
-            status_code=404,
-            detail=str(error)
-        )
+        raise HTTPException(status_code=404, detail=str(error))
 
     except (ValueError, IOError) as error:
-
-        raise HTTPException(
-            status_code=400,
-            detail=str(error)
-        )
+        raise HTTPException(status_code=400, detail=str(error))
 
     except Exception as error:
 
@@ -283,7 +163,7 @@ def detect_video_persons(
 
 
 # --------------------------------------------------
-# Extract OSNet Features from Video Person Crops
+# EXTRACT OSNET FEATURES
 # --------------------------------------------------
 
 @router.post("/{video_id}/extract-features")
@@ -294,7 +174,7 @@ def extract_video_features(
 
     try:
 
-        result = VideoOSNetFeatureService.extract_features(
+        result = VideoController.extract_features(
             video_id=str(video_id),
             interval_seconds=interval_seconds
         )
@@ -306,18 +186,10 @@ def extract_video_features(
         }
 
     except FileNotFoundError as error:
-
-        raise HTTPException(
-            status_code=404,
-            detail=str(error)
-        )
+        raise HTTPException(status_code=404, detail=str(error))
 
     except (ValueError, IOError) as error:
-
-        raise HTTPException(
-            status_code=400,
-            detail=str(error)
-        )
+        raise HTTPException(status_code=400, detail=str(error))
 
     except Exception as error:
 
@@ -328,12 +200,17 @@ def extract_video_features(
             detail="Video feature extraction failed"
         )
 
+
+# --------------------------------------------------
+# TRACK PERSONS
+# --------------------------------------------------
+
 @router.post("/{video_id}/track-persons")
 def track_video_persons(video_id: UUID):
 
     try:
 
-        result = VideoTrackingService.track_persons(
+        result = VideoController.track_persons(
             video_id=str(video_id)
         )
 
@@ -344,11 +221,9 @@ def track_video_persons(video_id: UUID):
         }
 
     except FileNotFoundError as error:
-
         raise HTTPException(status_code=404, detail=str(error))
 
     except (ValueError, IOError) as error:
-
         raise HTTPException(status_code=400, detail=str(error))
 
     except Exception as error:
@@ -359,7 +234,12 @@ def track_video_persons(video_id: UUID):
             status_code=500,
             detail="Video person tracking failed"
         )
-        
+
+
+# --------------------------------------------------
+# COMPARE VIDEO WITH REFERENCE IMAGE
+# --------------------------------------------------
+
 @router.post("/{video_id}/compare-reference")
 def compare_video_with_reference(
     video_id: UUID,
@@ -372,7 +252,7 @@ def compare_video_with_reference(
 
     try:
 
-        result = VideoMatchingService.compare_with_reference(
+        result = VideoController.compare_reference(
             video_id=str(video_id),
             reference_image_id=str(reference_image_id),
             interval_seconds=interval_seconds,
@@ -402,18 +282,17 @@ def compare_video_with_reference(
             detail="Video reference matching failed"
         )
 
+
 # --------------------------------------------------
-# Detect Non-Human Objects in Video Frames
+# DETECT NON-HUMAN OBJECTS
 # --------------------------------------------------
 
 @router.post("/{video_id}/detect-objects")
-def detect_video_objects(
-    video_id: UUID
-):
+def detect_video_objects(video_id: UUID):
 
     try:
 
-        result = VideoObjectDetectionService.detect_objects(
+        result = VideoController.detect_objects(
             video_id=str(video_id)
         )
 
@@ -424,18 +303,10 @@ def detect_video_objects(
         }
 
     except FileNotFoundError as error:
-
-        raise HTTPException(
-            status_code=404,
-            detail=str(error)
-        )
+        raise HTTPException(status_code=404, detail=str(error))
 
     except (ValueError, IOError) as error:
-
-        raise HTTPException(
-            status_code=400,
-            detail=str(error)
-        )
+        raise HTTPException(status_code=400, detail=str(error))
 
     except Exception as error:
 
@@ -444,4 +315,39 @@ def detect_video_objects(
         raise HTTPException(
             status_code=500,
             detail="Video object detection failed"
+        )
+
+
+# --------------------------------------------------
+# MATCH VIDEO PERSONS WITH REGISTERED EMPLOYEES
+# --------------------------------------------------
+
+@router.post("/{video_id}/match-employees")
+def match_video_employees(video_id: UUID):
+
+    try:
+
+        result = VideoController.match_employees(
+            video_id=str(video_id)
+        )
+
+        return {
+            "success": True,
+            "message": "Video employee matching completed successfully",
+            "data": result
+        }
+
+    except FileNotFoundError as error:
+        raise HTTPException(status_code=404, detail=str(error))
+
+    except (ValueError, IOError) as error:
+        raise HTTPException(status_code=400, detail=str(error))
+
+    except Exception as error:
+
+        print("Video employee matching error:", error)
+
+        raise HTTPException(
+            status_code=500,
+            detail="Video employee matching failed"
         )
