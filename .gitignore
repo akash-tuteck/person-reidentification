@@ -99,3 +99,8 @@ htmlcov/
 
 yolov8n.pt
 osnet_x1_0_imagenet.pth
+
+# Biometric data and local database
+data/
+
+yolov8m.pt

@@ -4,16 +4,19 @@ from fastapi.staticfiles import StaticFiles
 
 from app.config import settings
 from app.routers import router
+from app.database.session import init_db
 
 
 # Initialize FastAPI application
 app = FastAPI(
     title=settings.APP_NAME,
-    description="Image Processing and Person Re-Identification Backend",
+    description="Person Re-Identification & Access Control Backend",
     version="1.0.0",
     debug=settings.DEBUG
 )
 
+# Initialize database tables
+init_db()
 
 # Register API routers
 app.include_router(router.api_router)

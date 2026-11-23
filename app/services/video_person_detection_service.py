@@ -5,6 +5,7 @@ import shutil
 
 from pathlib import Path
 
+from app.config import settings
 from app.services.osnet_service import EMBEDDING_DIR
 from app.services.person_detection_service import PersonDetectionService
 
@@ -100,8 +101,8 @@ class VideoPersonDetectionService:
             results = model.predict(
                 source=frame,
                 classes=[0],
-                conf=0.35,
-                imgsz=640,
+                conf=settings.YOLO_CONF,
+                imgsz=settings.YOLO_IMGSZ,
                 verbose=False
             )
 

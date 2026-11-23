@@ -4,6 +4,7 @@ import cv2
 from pathlib import Path
 from ultralytics import YOLO
 
+from app.config import settings
 from app.services.image_service import ImageProcessingService
 
 
@@ -24,7 +25,7 @@ class PersonDetectionService:
     @classmethod
     def get_model(cls):
         if cls._model is None:
-            cls._model = YOLO("yolov8n.pt")
+            cls._model = YOLO(settings.YOLO_MODEL)
 
         return cls._model
 
@@ -48,8 +49,8 @@ class PersonDetectionService:
         results = model.predict(
             source=str(image_path),
             classes=[0],
-            conf=0.35,
-            imgsz=640,
+            conf=settings.YOLO_CONF,
+            imgsz=settings.YOLO_IMGSZ,
             verbose=False
         )
 
