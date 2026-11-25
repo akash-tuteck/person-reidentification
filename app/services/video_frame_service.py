@@ -1,4 +1,3 @@
-
 import cv2
 import json
 
@@ -21,12 +20,25 @@ class VideoFrameService:
                 "Interval must be greater than zero"
             )
 
-        video_path = VIDEO_DIR / f"{video_id}.mp4"
+        # VideoController accepts multiple formats. Resolve the stored
+        # upload by its generated ID instead of assuming every upload is MP4.
+        video_files = sorted(
+            path
+            for path in VIDEO_DIR.glob(f"{video_id}.*")
+            if path.is_file()
+        )
 
-        if not video_path.exists():
+        if not video_files:
             raise FileNotFoundError(
-                f"Video not found: {video_path}"
+                f"Video not found for ID: {video_id}"
             )
+
+        if len(video_files) > 1:
+            raise ValueError(
+                f"Multiple video files found for ID: {video_id}"
+            )
+
+        video_path = video_files[0]
 
         output_dir = FRAME_DIR / str(video_id)
 
