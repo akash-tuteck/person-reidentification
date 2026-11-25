@@ -51,6 +51,67 @@ Rules:
 9. Do not include Markdown, explanations, or thinking text.
 """
 
+    DISCOVERY_SYSTEM_PROMPT = """
+You are an object discovery assistant for a CCTV object analysis system.
+
+Analyze the entire supplied CCTV image.
+
+Identify meaningful, separately identifiable physical objects
+that could be detected and tracked independently.
+
+Include common objects such as:
+bags, backpacks, handbags, bottles, chairs, tables, laptops,
+phones, vehicles, boxes, bicycles and other clearly visible objects.
+
+Exclude:
+1. People and human body parts.
+2. Clothing and tiny clothing details.
+3. Shadows and reflections.
+4. Tiny details and object parts.
+5. Objects that cannot be visually distinguished.
+6. Background textures and scenery that are not separate objects.
+
+Rules:
+1. Identify only objects supported by visible evidence.
+2. Do not invent objects.
+3. Do not infer ownership, identity, or intent.
+4. Use common singular category names in lowercase.
+5. Do not return duplicate categories.
+6. Prefer meaningful physical objects over tiny details.
+7. Return an empty list if no meaningful objects are visible.
+
+Return exactly one JSON object:
+
+{
+    "objects": [
+        {
+            "category": "backpack",
+            "description": "A dark backpack beside a chair"
+        }
+    ]
+}
+
+Return JSON only.
+Do not include Markdown, explanations, or reasoning.
+"""
+
+    EXCLUDED_DISCOVERY_CATEGORIES = {
+        "person",
+        "people",
+        "human",
+        "humans",
+        "man",
+        "woman",
+        "child",
+        "boy",
+        "girl",
+        "body",
+        "face",
+        "hand",
+        "leg",
+        "arm"
+    }
+
     @classmethod
     def _encode_image(cls, image_path: str | Path) -> tuple[str, str]:
 
@@ -83,11 +144,9 @@ Rules:
 
         content = message.get("content")
 
-        # Standard OpenAI-compatible string response.
         if isinstance(content, str):
             return content.strip()
 
-        # Some servers return content as a list of text blocks.
         if isinstance(content, list):
 
             text_parts = []
@@ -119,7 +178,6 @@ Rules:
                 "Gemma returned an empty content response"
             )
 
-        # Remove Markdown code fences.
         if response_text.startswith("```"):
 
             lines = response_text.splitlines()
@@ -132,14 +190,12 @@ Rules:
 
             response_text = "\n".join(lines).strip()
 
-        # First try parsing the complete response.
         try:
 
             result = json.loads(response_text)
 
         except json.JSONDecodeError:
 
-            # Recover a JSON object surrounded by extra text.
             start = response_text.find("{")
 
             if start == -1:
@@ -147,8 +203,6 @@ Rules:
                     "No JSON object found in Gemma response"
                 )
 
-            # Find the matching closing brace while respecting
-            # braces inside quoted JSON strings.
             depth = 0
             in_string = False
             escaped = False
@@ -215,7 +269,6 @@ Rules:
         detected_category: Optional[str] = None
     ) -> dict[str, Any]:
 
-        # Detector category remains authoritative.
         category = detected_category or result.get("category")
 
         if not isinstance(category, str) or not category.strip():
@@ -272,10 +325,11 @@ Rules:
         }
 
     @classmethod
-    def describe_object(
+    def _send_image_request(
         cls,
         image_path: str | Path,
-        detected_category: Optional[str] = None
+        system_prompt: str,
+        user_prompt: str
     ) -> dict[str, Any]:
 
         image_data, mime_type = cls._encode_image(image_path)
@@ -284,24 +338,11 @@ Rules:
             f"data:{mime_type};base64,{image_data}"
         )
 
-        user_prompt = (
-            "Examine the supplied image. "
-            "Return one complete JSON object following the system schema. "
-            "Do not provide reasoning or any text outside the JSON."
-        )
-
-        if detected_category:
-
-            user_prompt += (
-                f" The detector category is '{detected_category}'. "
-                "Preserve this category. Describe only visible evidence."
-            )
-
         payload = {
             "messages": [
                 {
                     "role": "system",
-                    "content": cls.SYSTEM_PROMPT
+                    "content": system_prompt
                 },
                 {
                     "role": "user",
@@ -322,8 +363,6 @@ Rules:
             "temperature": 0.1,
             "max_tokens": cls.MAX_TOKENS,
             "stream": False,
-
-            # Ask llama-server for JSON-constrained output.
             "response_format": {
                 "type": "json_object"
             }
@@ -349,7 +388,6 @@ Rules:
                 )
 
             choice = choices[0]
-
             message = choice.get("message", {})
 
             if not isinstance(message, dict):
@@ -361,32 +399,9 @@ Rules:
 
             if not content:
 
-                finish_reason = choice.get("finish_reason")
-
-                reasoning = message.get(
-                    "reasoning_content",
-                    message.get("reasoning", "")
-                )
-
-                reasoning_length = (
-                    len(reasoning)
-                    if isinstance(reasoning, str)
-                    else 0
-                )
-
-                logger.error(
-                    "Empty Gemma response. finish_reason=%s, "
-                    "reasoning_length=%s, usage=%s",
-                    finish_reason,
-                    reasoning_length,
-                    response_data.get("usage")
-                )
-
                 raise ValueError(
                     "Gemma returned empty content. "
-                    f"finish_reason={finish_reason}, "
-                    f"reasoning_length={reasoning_length}. "
-                    "Check llama-server generation settings."
+                    f"finish_reason={choice.get('finish_reason')}"
                 )
 
             logger.info(
@@ -396,18 +411,7 @@ Rules:
                 len(content)
             )
 
-            parsed_result = cls._extract_json(content)
-
-            normalized_result = cls._normalize_response(
-                parsed_result,
-                detected_category
-            )
-
-            return {
-                "success": True,
-                "model": "Gemma 4",
-                "data": normalized_result
-            }
+            return cls._extract_json(content)
 
         except requests.exceptions.ConnectionError as exc:
 
@@ -440,22 +444,132 @@ Rules:
                 f"Gemma API request failed: {exc}"
             ) from exc
 
-        except (KeyError, IndexError, TypeError) as exc:
+        except (KeyError, IndexError, TypeError, ValueError) as exc:
 
             logger.exception(
-                "Unexpected Gemma API response"
-            )
-
-            raise RuntimeError(
-                "Unexpected response format from Gemma."
-            ) from exc
-
-        except ValueError as exc:
-
-            logger.exception(
-                "Gemma returned invalid structured data"
+                "Invalid Gemma API response"
             )
 
             raise RuntimeError(
                 f"Invalid Gemma response: {exc}"
             ) from exc
+
+    @classmethod
+    def discover_objects(
+        cls,
+        image_path: str | Path
+    ) -> dict[str, Any]:
+
+        user_prompt = (
+            "Examine the complete CCTV image. "
+            "Identify all meaningful, independently identifiable "
+            "physical objects. Return their common categories and "
+            "brief visual descriptions in the required JSON format."
+        )
+
+        parsed_result = cls._send_image_request(
+            image_path=image_path,
+            system_prompt=cls.DISCOVERY_SYSTEM_PROMPT,
+            user_prompt=user_prompt
+        )
+
+        objects = parsed_result.get("objects")
+
+        if not isinstance(objects, list):
+            raise ValueError(
+                "Gemma discovery response must contain an objects list"
+            )
+
+        normalized_objects = []
+        seen_categories = set()
+
+        for item in objects:
+
+            if not isinstance(item, dict):
+                continue
+
+            category = item.get("category")
+            description = item.get("description")
+
+            if not isinstance(category, str):
+                continue
+
+            if not isinstance(description, str):
+                continue
+
+            category = category.strip().lower()
+            description = description.strip()
+
+            if not category or not description:
+                continue
+
+            if len(category) > 64 or len(description) > 300:
+                continue
+
+            if category in cls.EXCLUDED_DISCOVERY_CATEGORIES:
+                continue
+
+            if not all(
+                char.isalnum() or char in "_- "
+                for char in category
+            ):
+                continue
+
+            if category in seen_categories:
+                continue
+
+            seen_categories.add(category)
+
+            normalized_objects.append({
+                "category": category,
+                "description": description
+            })
+
+        logger.info(
+            "Gemma discovered %s object categories",
+            len(normalized_objects)
+        )
+
+        return {
+            "success": True,
+            "model": "Gemma 4",
+            "objects": normalized_objects,
+            "total_categories": len(normalized_objects)
+        }
+
+    @classmethod
+    def describe_object(
+        cls,
+        image_path: str | Path,
+        detected_category: Optional[str] = None
+    ) -> dict[str, Any]:
+
+        user_prompt = (
+            "Examine the supplied image. "
+            "Return one complete JSON object following the system schema. "
+            "Do not provide reasoning or any text outside the JSON."
+        )
+
+        if detected_category:
+
+            user_prompt += (
+                f" The detector category is '{detected_category}'. "
+                "Preserve this category. Describe only visible evidence."
+            )
+
+        parsed_result = cls._send_image_request(
+            image_path=image_path,
+            system_prompt=cls.SYSTEM_PROMPT,
+            user_prompt=user_prompt
+        )
+
+        normalized_result = cls._normalize_response(
+            parsed_result,
+            detected_category
+        )
+
+        return {
+            "success": True,
+            "model": "Gemma 4",
+            "data": normalized_result
+        }
