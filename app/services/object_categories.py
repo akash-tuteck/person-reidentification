@@ -1,16 +1,3 @@
-
-# app/services/object_categories.py
-
-"""
-Shared COCO object category configuration.
-
-COCO contains 80 classes:
-- 1 human category: person (class ID 0)
-- 79 non-human object categories
-
-This configuration is shared by image and video object detection.
-"""
-
 COCO_CLASS_NAMES = [
     "person",
     "bicycle",
