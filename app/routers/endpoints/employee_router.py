@@ -10,7 +10,32 @@ from app.services.employee_registration_service import (
 router = APIRouter()
 
 
-@router.post("/register", status_code=201)
+@router.post(
+    "/register",
+    status_code=201,
+    openapi_extra={
+        "requestBody": {
+            "required": True,
+            "content": {
+                "multipart/form-data": {
+                    "schema": {
+                        "type": "object",
+                        "required": ["employee_id", "employee_name", "files"],
+                        "properties": {
+                            "employee_id": {"type": "string"},
+                            "employee_name": {"type": "string"},
+                            "files": {
+                                "type": "array",
+                                "items": {"type": "string", "format": "binary"},
+                                "description": "Upload 1 to 5 JPG, PNG or WEBP reference photos",
+                            },
+                        },
+                    }
+                }
+            },
+        }
+    },
+)
 async def register_employee(
     employee_id: str = Form(...),
     employee_name: str = Form(...),
