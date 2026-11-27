@@ -18,7 +18,8 @@ logger = logging.getLogger(__name__)
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 UPLOAD_DIR = BASE_DIR / "uploads"
-OBJECT_DIR = UPLOAD_DIR / "objects"
+LEGACY_OBJECT_DIR = UPLOAD_DIR / "objects"
+GROUNDING_DINO_OBJECT_DIR = UPLOAD_DIR / "grounding_dino" / "objects"
 EMBEDDING_DIR = UPLOAD_DIR / "embeddings"
 
 OBJECT_EMBEDDING_DIR = EMBEDDING_DIR / "objects"
@@ -235,11 +236,19 @@ class ObjectFeatureService:
     @classmethod
     def extract_features(cls, image_id: str) -> dict:
 
-        image_object_dir = OBJECT_DIR / image_id
+        # Prefer Grounding DINO crops; retain compatibility with legacy YOLO crops.
+        grounding_dino_dir = GROUNDING_DINO_OBJECT_DIR / image_id
+        legacy_object_dir = LEGACY_OBJECT_DIR / image_id
+        image_object_dir = (
+            grounding_dino_dir
+            if grounding_dino_dir.exists()
+            else legacy_object_dir
+        )
 
         if not image_object_dir.exists():
             raise ValueError(
-                f"Object detections not found for image: {image_id}"
+                f"Object detections not found for image: {image_id}. "
+                "Run object detection first."
             )
 
         embedding_image_dir = OBJECT_EMBEDDING_DIR / image_id
