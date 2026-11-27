@@ -218,6 +218,31 @@ def detect_objects(
         )
 
 
+
+# --------------------------------------------------
+# AUTOMATIC GEMMA + GROUNDING DINO OBJECT DETECTION
+# --------------------------------------------------
+@router.post("/{image_id}/detect-objects-automatically")
+def detect_objects_automatically(image_id: UUID, request: Request):
+    try:
+        result = ImageController.detect_objects_automatically(
+            image_id=str(image_id),
+            base_url=str(request.base_url).rstrip("/")
+        )
+        return {
+            "success": True,
+            "message": "Automatic object discovery and detection completed",
+            "data": result
+        }
+    except ValueError as error:
+        raise HTTPException(status_code=404, detail=str(error))
+    except RuntimeError as error:
+        raise HTTPException(status_code=503, detail=str(error))
+    except Exception as error:
+        print("Automatic object detection error:", error)
+        raise HTTPException(status_code=500, detail="Automatic object detection failed")
+
+
 # --------------------------------------------------
 # Existing OSNet feature extraction
 # --------------------------------------------------
