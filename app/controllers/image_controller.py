@@ -11,6 +11,7 @@ from app.services.image_quality_service import ImageQualityService
 from app.services.similarity_service import SimilarityService
 from app.services.object_feature_service import ObjectFeatureService
 from app.services.object_similarity_service import ObjectSimilarityService
+from app.services.grounding_dino_service import GroundingDINOService
 
 class ImageController:
     PERSON_DIR = EMBEDDING_DIR.parent / "persons"
@@ -124,6 +125,40 @@ class ImageController:
             ),
             "objects": objects
         }
+
+
+    # ---------------------------------------------------------
+    # AUTOMATIC OBJECT DISCOVERY + GROUNDING DINO
+    # ---------------------------------------------------------
+    @staticmethod
+    def detect_objects_automatically(
+        image_id: str,
+        base_url: str
+    ) -> dict:
+        result = GroundingDINOService.detect_objects_automatically(
+            image_id=image_id
+        )
+        detection = result.get("detection")
+        if detection is not None:
+            objects = []
+            for item in detection.get("objects", []):
+                object_data = {
+                    key: value
+                    for key, value in item.items()
+                    if key != "crop_path"
+                }
+                object_data["crop_image_url"] = (
+                    f"{base_url}/uploads/grounding_dino/objects/"
+                    f"{image_id}/{item['category']}/{item['crop_filename']}"
+                )
+                objects.append(object_data)
+            detection["objects"] = objects
+            detection["annotated_image_url"] = (
+                f"{base_url}/uploads/grounding_dino/detections/{image_id}.jpg"
+            )
+            detection.pop("annotated_image_path", None)
+            detection.pop("metadata_path", None)
+        return result
 
     # ---------------------------------------------------------
     # PERSON FEATURE EXTRACTION
