@@ -378,7 +378,11 @@ class ObjectFeatureService:
                         embedding.shape[0]
                     ),
                     "description_filename": description_path.name,
-                    "description_status": description_metadata["status"]
+                    "description_status": description_metadata["status"],
+                    # Return Gemma's structured semantic attributes to the API
+                    # so the frontend can display them without reading server files.
+                    "gemma_features": description_metadata.get("description"),
+                    "description_error": description_metadata.get("error")
                 })
 
             if category_count > 0:
