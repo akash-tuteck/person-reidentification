@@ -1,7 +1,5 @@
 import json
 
-from pathlib import Path
-
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
 from app.services.employee_registration_service import (
@@ -16,7 +14,10 @@ router = APIRouter()
 async def register_employee(
     employee_id: str = Form(...),
     employee_name: str = Form(...),
-    files: list[UploadFile] = File(..., description="Upload 1 to 5 JPG, PNG or WEBP reference photos"),
+    files: list[UploadFile] = File(
+        ...,
+        description="Upload 1 to 5 JPG, PNG or WEBP reference photos",
+    ),
 ):
     """Register an employee and create normalized 512-D OSNet reference embeddings."""
     try:
@@ -77,7 +78,8 @@ def list_employees():
 @router.get("/{employee_id}")
 def get_employee(employee_id: str):
     """Get registration metadata for one employee."""
-    if not employee_id or any(char not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-" for char in employee_id):
+    allowed_characters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-"
+    if not employee_id or any(char not in allowed_characters for char in employee_id):
         raise HTTPException(status_code=400, detail="Invalid employee ID")
 
     metadata_path = EMPLOYEE_REGISTRY_DIR / employee_id / "employee.json"
